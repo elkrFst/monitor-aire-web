@@ -1,9 +1,11 @@
-// Completa estas credenciales con los datos del dispositivo en Particle Console.
-// Limita el alcance del token a este dispositivo y evita publicar este archivo con el token real.
+// Obtén el ID en Particle Console > Devices > tu dispositivo.
+const DEMO_MODE = false;
 const DEVICE_ID = "25001d000847313037363132";
-const ACCESS_TOKEN = "90e096fcbf182c0993bb68f31a3287af295180f0";
+// Obtén un token en Particle Console > Settings > Access Tokens.
+// No publiques un token real en una aplicación web: cualquier visitante podría verlo.
+const ACCESS_TOKEN = "";
 
-const particle = new Particle();
+const particle = !DEMO_MODE && typeof Particle !== "undefined" ? new Particle() : null;
 const elements = {
   connection: document.getElementById("connection-status"),
   connectionLabel: document.getElementById("connection-label"),
@@ -17,9 +19,12 @@ const elements = {
 
 const HISTORY_LIMIT = 24;
 const history = { labels: [], temperature: [], humidity: [], eco2: [] };
+const latestValues = { temperature: null, humidity: null, eco2: null };
 let activeThreshold = 1000;
 let eventStream;
 let historyChart;
+let reconnectTimer = null;
+let isConnecting = false;
 
 function setConnection(state, label) {
   elements.connection.dataset.state = state;
@@ -58,13 +63,13 @@ function setMetric(id, value, digits, state, label) {
 function metricStatus(metric, value) {
   if (value === null) return { state: "unknown", label: "Sin datos" };
   if (metric === "temperature") {
-    if (value < 18 || value > 30) return { state: "alert", label: "Fuera de rango" };
+    if (value < 18 || value > 28) return { state: "alert", label: "Alerta" };
     if (value < 20 || value > 26) return { state: "caution", label: "Precaución" };
     return { state: "good", label: "Confort" };
   }
   if (metric === "humidity") {
-    if (value < 20 || value > 70) return { state: "alert", label: "Fuera de rango" };
-    if (value < 30 || value > 60) return { state: "caution", label: "Precaución" };
+    if (value < 30 || value > 70) return { state: "alert", label: "Alerta" };
+    if (value < 40 || value > 60) return { state: "caution", label: "Precaución" };
     return { state: "good", label: "Confort" };
   }
   if (value >= activeThreshold * 1.5) return { state: "alert", label: "Alerta" };
@@ -74,13 +79,21 @@ function metricStatus(metric, value) {
 
 function addToHistory(values) {
   const now = new Date();
-  history.labels.push(now.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" }));
+  history.labels.push(now.toLocaleTimeString("es", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }));
   history.temperature.push(values.temperature);
   history.humidity.push(values.humidity);
   history.eco2.push(values.eco2);
+
   while (history.labels.length > HISTORY_LIMIT) {
-    for (const metric of Object.keys(history)) history[metric].shift();
+    for (const metric of Object.keys(history)) {
+      history[metric].shift();
+    }
   }
+
   if (!historyChart) return;
   historyChart.data.labels = [...history.labels];
   historyChart.data.datasets[0].data = [...history.temperature];
@@ -95,21 +108,28 @@ function updateDashboard(payload) {
     return;
   }
 
-  const values = {
-    temperature: getMetric(payload, ["temperature", "temperatura", "temp"]),
-    humidity: getMetric(payload, ["humidity", "humedad", "relative_humidity"]),
-    eco2: getMetric(payload, ["eco2", "eCO2", "co2", "calidad_aire"])
+  // Acepta las llaves del JSON de la Photon 1 y también del Módulo 2 si se integra
+  const receivedValues = {
+    temperature: getMetric(payload, ["temperatura", "temperature", "temp"]),
+    humidity: getMetric(payload, ["humedad", "humidity", "hum"]),
+    eco2: getMetric(payload, ["eco2", "eCO2", "co2", "mq135", "mq2", "calidad_aire"])
   };
-  if (Object.values(values).every(value => value === null)) {
+
+  if (Object.values(receivedValues).every(value => value === null)) {
     setConnection("error", "Evento sin métricas reconocidas");
     return;
   }
 
-  for (const metric of Object.keys(values)) {
-    const status = metricStatus(metric, values[metric]);
-    setMetric(metric, values[metric], metric === "eco2" ? 0 : 1, status.state, status.label);
+  for (const metric of Object.keys(receivedValues)) {
+    if (receivedValues[metric] !== null) {
+      latestValues[metric] = receivedValues[metric];
+    }
+
+    const status = metricStatus(metric, latestValues[metric]);
+    setMetric(metric, latestValues[metric], metric === "eco2" ? 0 : 1, status.state, status.label);
   }
-  addToHistory(values);
+
+  addToHistory(latestValues);
   elements.updated.textContent = new Date().toLocaleTimeString("es", { hour12: false });
   setConnection("connected", "Conectado a Particle Cloud");
 }
@@ -134,9 +154,42 @@ function initChart() {
     data: {
       labels: history.labels,
       datasets: [
-        { label: "Temperatura (°C)", data: history.temperature, borderColor: "#f1b85b", backgroundColor: "rgba(241,184,91,.08)", yAxisID: "y", tension: .38, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4, spanGaps: true },
-        { label: "Humedad (%)", data: history.humidity, borderColor: "#54c9e8", backgroundColor: "rgba(84,201,232,.08)", yAxisID: "y", tension: .38, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4, spanGaps: true },
-        { label: "eCO₂ (ppm)", data: history.eco2, borderColor: "#58dfb0", backgroundColor: "rgba(88,223,176,.08)", yAxisID: "y1", tension: .38, borderWidth: 2, pointRadius: 2, pointHoverRadius: 4, spanGaps: true }
+        {
+          label: "Temperatura (°C)",
+          data: history.temperature,
+          borderColor: "#f1b85b",
+          backgroundColor: "rgba(241,184,91,.08)",
+          yAxisID: "y",
+          tension: 0.38,
+          borderWidth: 2,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          spanGaps: true
+        },
+        {
+          label: "Humedad (%)",
+          data: history.humidity,
+          borderColor: "#54c9e8",
+          backgroundColor: "rgba(84,201,232,.08)",
+          yAxisID: "y",
+          tension: 0.38,
+          borderWidth: 2,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          spanGaps: true
+        },
+        {
+          label: "eCO₂ (ppm)",
+          data: history.eco2,
+          borderColor: "#58dfb0",
+          backgroundColor: "rgba(88,223,176,.08)",
+          yAxisID: "y1",
+          tension: 0.38,
+          borderWidth: 2,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          spanGaps: true
+        }
       ]
     },
     options: {
@@ -145,73 +198,125 @@ function initChart() {
       interaction: { intersect: false, mode: "index" },
       plugins: {
         legend: { display: false },
-        tooltip: { backgroundColor: "#18232e", borderColor: "rgba(165,190,208,.16)", borderWidth: 1, titleColor: "#dce7eb", bodyColor: "#9cacb5", padding: 10, displayColors: true }
+        tooltip: {
+          backgroundColor: "#18232e",
+          borderColor: "rgba(165,190,208,.16)",
+          borderWidth: 1,
+          titleColor: "#dce7eb",
+          bodyColor: "#9cacb5",
+          padding: 10,
+          displayColors: true
+        }
       },
       scales: {
-        x: { grid: { display: false }, border: { display: false }, ticks: { color: "#667580", maxTicksLimit: 6, font: { family: "DM Sans", size: 9 } } },
-        y: { position: "left", grid: { color: "rgba(165,190,208,.07)" }, border: { display: false }, ticks: { color: "#667580", maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } } },
-        y1: { position: "right", display: false, grid: { drawOnChartArea: false } }
+        x: {
+          grid: { display: false },
+          border: { display: false },
+          ticks: { color: "#667580", maxTicksLimit: 6, font: { family: "DM Sans", size: 9 } }
+        },
+        y: {
+          position: "left",
+          grid: { color: "rgba(165,190,208,.07)" },
+          border: { display: false },
+          ticks: { color: "#667580", maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
+        },
+        y1: {
+          position: "right",
+          display: false,
+          grid: { drawOnChartArea: false }
+        }
       }
     }
   });
 }
 
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    connectToParticle();
+  }, 5000);
+}
+
 async function connectToParticle() {
-  if (!DEVICE_ID || !ACCESS_TOKEN) {
-    setConnection("offline", "Configura tus credenciales de Particle");
+  if (isConnecting) return;
+
+  if (!DEVICE_ID || DEVICE_ID.includes("PEGA_AQUI") || !ACCESS_TOKEN || ACCESS_TOKEN.includes("PEGA_AQUI")) {
+    setConnection("offline", "Faltan credenciales en app.js");
     return;
   }
-  if (typeof particle.getEventStream !== "function") {
-    setConnection("error", "No se pudo cargar Particle Cloud");
+
+  if (!particle || typeof particle.getEventStream !== "function") {
+    setConnection("error", "No se pudo cargar particle-api-js");
     return;
   }
 
   setConnection("offline", "Conectando a Particle Cloud…");
+  isConnecting = true;
+
   try {
-    eventStream = await particle.getEventStream({
+    const stream = await particle.getEventStream({
       deviceId: DEVICE_ID,
       name: "calidad_aire",
       auth: ACCESS_TOKEN
     });
-    eventStream.on("event", event => {
+    eventStream = stream;
+    isConnecting = false;
+
+    const handleDisconnect = (state, label) => {
+      if (eventStream !== stream) return;
+      eventStream = null;
+      setConnection(state, label);
+      scheduleReconnect();
+    };
+
+    setConnection("connected", "Esperando lectura del Photon…");
+
+    stream.on("event", event => {
+      if (eventStream !== stream) return;
       try {
         updateDashboard(parseEventData(event));
       } catch (error) {
         console.error("No se pudo procesar el evento calidad_aire:", error);
-        setConnection("error", "Error al leer los datos");
+        setConnection("error", "Error al leer el JSON");
       }
     });
-    eventStream.on("error", error => {
+
+    stream.on("error", error => {
       console.error("Error en el flujo de Particle Cloud:", error);
-      setConnection("error", "Error de conexión con Particle Cloud");
+      handleDisconnect("error", "Reconectando a Particle Cloud…");
     });
-    eventStream.on("end", () => setConnection("offline", "Flujo de Particle Cloud finalizado"));
+
+    stream.on("end", () => handleDisconnect("offline", "Flujo cerrado. Reconectando…"));
+    stream.on("close", () => handleDisconnect("offline", "Flujo cerrado. Reconectando…"));
   } catch (error) {
     console.error("No se pudo conectar a Particle Cloud:", error);
-    setConnection("error", "No se pudo conectar a Particle Cloud");
+    setConnection("error", "Sin conexión · reintentando…");
+    scheduleReconnect();
+  } finally {
+    isConnecting = false;
   }
 }
 
 elements.form.addEventListener("submit", async event => {
   event.preventDefault();
   const threshold = Number(elements.threshold.value);
+
   if (!Number.isInteger(threshold) || threshold < 400 || threshold > 10000) {
     setNotice("error", "Ingresa un umbral entero entre 400 y 10 000 ppm.");
     elements.threshold.focus();
     return;
   }
-  if (!DEVICE_ID || !ACCESS_TOKEN) {
+
+  if (!DEVICE_ID || DEVICE_ID.includes("PEGA_AQUI") || !ACCESS_TOKEN || ACCESS_TOKEN.includes("PEGA_AQUI")) {
     setNotice("error", "Completa DEVICE_ID y ACCESS_TOKEN en app.js antes de enviar el comando.");
-    return;
-  }
-  if (typeof particle.callFunction !== "function") {
-    setNotice("error", "No se pudo cargar la librería de Particle Cloud.");
     return;
   }
 
   elements.button.disabled = true;
   elements.button.querySelector("span").textContent = "Enviando comando…";
   elements.notice.hidden = true;
+
   try {
     const response = await particle.callFunction({
       deviceId: DEVICE_ID,
@@ -219,6 +324,7 @@ elements.form.addEventListener("submit", async event => {
       argument: String(threshold),
       auth: ACCESS_TOKEN
     });
+
     if (response.return_value > 0) {
       activeThreshold = threshold;
       setNotice("success", `Umbral actualizado correctamente a ${threshold} ppm.`);
@@ -227,7 +333,7 @@ elements.form.addEventListener("submit", async event => {
     }
   } catch (error) {
     console.error("Falló la llamada a setUmbral:", error);
-    setNotice("error", "No fue posible actualizar el umbral. Verifica la conexión y la configuración del dispositivo.");
+    setNotice("error", "No fue posible actualizar el umbral. Verifica que la Photon esté en línea.");
   } finally {
     elements.button.disabled = false;
     elements.button.querySelector("span").textContent = "Actualizar umbral";
