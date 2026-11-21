@@ -1,40 +1,31 @@
-// Obtén el ID en Particle Console > Devices > tu dispositivo.
-const DEMO_MODE = false;
-const DEVICE_ID = "25001d000847313037363132";
-// Obtén un token en Particle Console > Settings > Access Tokens.
-// No publiques un token real en una aplicación web: cualquier visitante podría verlo.
-const ACCESS_TOKEN = "";
-
-const particle = !DEMO_MODE && typeof Particle !== "undefined" ? new Particle() : null;
+const HISTORY_LIMIT = 24;
+const metricDefinitions = {
+  temperature1: { digits: 1, unit: "°C", chart: 0 },
+  humidity1: { digits: 0, unit: "%", chart: 1 },
+  mq9: { digits: 0, unit: "%", chart: 2 },
+  temperature2: { digits: 1, unit: "°C", chart: 3 },
+  humidity2: { digits: 0, unit: "%", chart: 4 },
+  mq2: { digits: 0, unit: "%", chart: 5 }
+};
+const history = { labels: [], values: Object.fromEntries(
+  Object.keys(metricDefinitions).map(metric => [metric, []])
+) };
+const latestValues = Object.fromEntries(
+  Object.keys(metricDefinitions).map(metric => [metric, null])
+);
 const elements = {
   connection: document.getElementById("connection-status"),
   connectionLabel: document.getElementById("connection-label"),
   updated: document.getElementById("last-updated"),
-  form: document.getElementById("threshold-form"),
-  threshold: document.getElementById("threshold-input"),
-  button: document.getElementById("threshold-button"),
-  notice: document.getElementById("action-notice"),
   footerYear: document.getElementById("footer-year")
 };
-
-const HISTORY_LIMIT = 24;
-const history = { labels: [], temperature: [], humidity: [], eco2: [] };
-const latestValues = { temperature: null, humidity: null, eco2: null };
-let activeThreshold = 1000;
-let eventStream;
 let historyChart;
-let reconnectTimer = null;
-let isConnecting = false;
+let eventStream;
+let hasReceivedData = false;
 
 function setConnection(state, label) {
   elements.connection.dataset.state = state;
   elements.connectionLabel.textContent = label;
-}
-
-function setNotice(type, message) {
-  elements.notice.dataset.type = type;
-  elements.notice.textContent = message;
-  elements.notice.hidden = false;
 }
 
 function asFiniteNumber(value) {
@@ -43,104 +34,92 @@ function asFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function getMetric(payload, keys) {
-  for (const key of keys) {
-    const value = asFiniteNumber(payload[key]);
-    if (value !== null) return value;
-  }
-  return null;
-}
-
-function setMetric(id, value, digits, state, label) {
-  const card = document.querySelector(`[data-metric="${id}"]`);
-  const output = document.getElementById(`${id === "eco2" ? "eco2" : id}-value`);
-  const stateOutput = document.getElementById(`${id}-state`);
-  output.textContent = value === null ? "--" : value.toFixed(digits);
-  stateOutput.textContent = label;
-  card.dataset.state = state;
-}
-
 function metricStatus(metric, value) {
   if (value === null) return { state: "unknown", label: "Sin datos" };
-  if (metric === "temperature") {
-    if (value < 18 || value > 28) return { state: "alert", label: "Alerta" };
-    if (value < 20 || value > 26) return { state: "caution", label: "Precaución" };
-    return { state: "good", label: "Confort" };
-  }
-  if (metric === "humidity") {
-    if (value < 30 || value > 70) return { state: "alert", label: "Alerta" };
-    if (value < 40 || value > 60) return { state: "caution", label: "Precaución" };
-    return { state: "good", label: "Confort" };
-  }
-  if (value >= activeThreshold * 1.5) return { state: "alert", label: "Alerta" };
-  if (value >= activeThreshold) return { state: "caution", label: "Precaución" };
-  return { state: "good", label: "Buena" };
+  if (metric.startsWith("mq")) return { state: "unknown", label: "Escala relativa" };
+  return { state: "good", label: "Lectura recibida" };
+}
+
+function setMetric(metric, value) {
+  const definition = metricDefinitions[metric];
+  const card = document.querySelector(`[data-metric="${metric}"]`);
+  const output = document.getElementById(`${metric}-value`);
+  const stateOutput = document.getElementById(`${metric}-state`);
+  output.textContent = value === null ? "--" : value.toFixed(definition.digits);
+  const status = metricStatus(metric, value);
+  stateOutput.textContent = status.label;
+  card.dataset.state = status.state;
 }
 
 function addToHistory(values) {
-  const now = new Date();
-  history.labels.push(now.toLocaleTimeString("es", {
+  history.labels.push(new Date().toLocaleTimeString("es", {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit"
   }));
-  history.temperature.push(values.temperature);
-  history.humidity.push(values.humidity);
-  history.eco2.push(values.eco2);
-
+  for (const metric of Object.keys(metricDefinitions)) {
+    history.values[metric].push(values[metric]);
+  }
   while (history.labels.length > HISTORY_LIMIT) {
-    for (const metric of Object.keys(history)) {
-      history[metric].shift();
+    history.labels.shift();
+    for (const metric of Object.keys(metricDefinitions)) {
+      history.values[metric].shift();
     }
   }
-
   if (!historyChart) return;
   historyChart.data.labels = [...history.labels];
-  historyChart.data.datasets[0].data = [...history.temperature];
-  historyChart.data.datasets[1].data = [...history.humidity];
-  historyChart.data.datasets[2].data = [...history.eco2];
+  historyChart.data.datasets.forEach((dataset, index) => {
+    const metric = Object.keys(metricDefinitions).find(
+      key => metricDefinitions[key].chart === index
+    );
+    dataset.data = [...history.values[metric]];
+  });
   historyChart.update("none");
 }
 
 function updateDashboard(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    setConnection("error", "Datos de evento no válidos");
+    setConnection("error", "Se recibieron datos no válidos");
     return;
   }
 
-  // Acepta las llaves del JSON de la Photon 1 y también del Módulo 2 si se integra
-  const receivedValues = {
-    temperature: getMetric(payload, ["temperatura", "temperature", "temp"]),
-    humidity: getMetric(payload, ["humedad", "humidity", "hum"]),
-    eco2: getMetric(payload, ["eco2", "eCO2", "co2", "mq135", "mq2", "calidad_aire"])
-  };
-
-  if (Object.values(receivedValues).every(value => value === null)) {
-    setConnection("error", "Evento sin métricas reconocidas");
-    return;
+  for (const metric of Object.keys(metricDefinitions)) {
+    const value = asFiniteNumber(payload[metric]);
+    latestValues[metric] = value;
+    setMetric(metric, value);
   }
 
-  for (const metric of Object.keys(receivedValues)) {
-    if (receivedValues[metric] !== null) {
-      latestValues[metric] = receivedValues[metric];
-    }
-
-    const status = metricStatus(metric, latestValues[metric]);
-    setMetric(metric, latestValues[metric], metric === "eco2" ? 0 : 1, status.state, status.label);
+  if (payload.updatedAt) {
+    addToHistory(latestValues);
+    elements.updated.textContent = new Date(payload.updatedAt).toLocaleTimeString("es", { hour12: false });
+    hasReceivedData = true;
+    setConnection("connected", "Datos recibidos de los módulos");
+  } else {
+    setConnection("connected", "Servidor local · esperando sensores");
   }
-
-  addToHistory(latestValues);
-  elements.updated.textContent = new Date().toLocaleTimeString("es", { hour12: false });
-  setConnection("connected", "Conectado a Particle Cloud");
 }
 
-function parseEventData(event) {
-  if (typeof event.data !== "string") return event.data;
-  try {
-    return JSON.parse(event.data);
-  } catch (error) {
-    throw new Error("El evento calidad_aire no contiene un JSON válido.");
+function connectToReadings() {
+  if (typeof EventSource === "undefined") {
+    setConnection("error", "Este navegador no admite eventos en tiempo real");
+    return;
   }
+
+  eventStream = new EventSource("/api/events");
+  eventStream.onopen = () => {
+    if (!hasReceivedData) setConnection("connected", "Servidor local conectado");
+  };
+  eventStream.onmessage = event => {
+    try {
+      updateDashboard(JSON.parse(event.data));
+    } catch (error) {
+      console.error("No se pudo procesar la lectura recibida:", error);
+      setConnection("error", "Se recibieron datos no válidos");
+    }
+  };
+  eventStream.onerror = () => {
+    setConnection("offline", "Reconectando con el servidor local…");
+  };
 }
 
 function initChart() {
@@ -148,49 +127,30 @@ function initChart() {
     console.error("Chart.js no está disponible; se omite la gráfica histórica.");
     return;
   }
-  const context = document.getElementById("history-chart").getContext("2d");
-  historyChart = new Chart(context, {
+  const datasets = [
+    { label: "Temperatura M1 (°C)", metric: "temperature1", color: "#f1b85b", axis: "y" },
+    { label: "Humedad M1 (%)", metric: "humidity1", color: "#54c9e8", axis: "y" },
+    { label: "MQ-9 relativo (%)", metric: "mq9", color: "#58dfb0", axis: "y1" },
+    { label: "Temperatura M2 (°C)", metric: "temperature2", color: "#ff8c69", axis: "y" },
+    { label: "Humedad M2 (%)", metric: "humidity2", color: "#a99bff", axis: "y" },
+    { label: "MQ-2 relativo (%)", metric: "mq2", color: "#f47fa5", axis: "y1" }
+  ];
+  historyChart = new Chart(document.getElementById("history-chart").getContext("2d"), {
     type: "line",
     data: {
       labels: history.labels,
-      datasets: [
-        {
-          label: "Temperatura (°C)",
-          data: history.temperature,
-          borderColor: "#f1b85b",
-          backgroundColor: "rgba(241,184,91,.08)",
-          yAxisID: "y",
-          tension: 0.38,
-          borderWidth: 2,
-          pointRadius: 2,
-          pointHoverRadius: 4,
-          spanGaps: true
-        },
-        {
-          label: "Humedad (%)",
-          data: history.humidity,
-          borderColor: "#54c9e8",
-          backgroundColor: "rgba(84,201,232,.08)",
-          yAxisID: "y",
-          tension: 0.38,
-          borderWidth: 2,
-          pointRadius: 2,
-          pointHoverRadius: 4,
-          spanGaps: true
-        },
-        {
-          label: "eCO₂ (ppm)",
-          data: history.eco2,
-          borderColor: "#58dfb0",
-          backgroundColor: "rgba(88,223,176,.08)",
-          yAxisID: "y1",
-          tension: 0.38,
-          borderWidth: 2,
-          pointRadius: 2,
-          pointHoverRadius: 4,
-          spanGaps: true
-        }
-      ]
+      datasets: datasets.map(dataset => ({
+        label: dataset.label,
+        data: history.values[dataset.metric],
+        borderColor: dataset.color,
+        backgroundColor: `${dataset.color}18`,
+        yAxisID: dataset.axis,
+        tension: 0.35,
+        borderWidth: 2,
+        pointRadius: 2,
+        pointHoverRadius: 4,
+        spanGaps: true
+      }))
     },
     options: {
       responsive: true,
@@ -204,8 +164,7 @@ function initChart() {
           borderWidth: 1,
           titleColor: "#dce7eb",
           bodyColor: "#9cacb5",
-          padding: 10,
-          displayColors: true
+          padding: 10
         }
       },
       scales: {
@@ -222,124 +181,17 @@ function initChart() {
         },
         y1: {
           position: "right",
-          display: false,
-          grid: { drawOnChartArea: false }
+          min: 0,
+          max: 100,
+          grid: { drawOnChartArea: false },
+          border: { display: false },
+          ticks: { color: "#667580", maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
         }
       }
     }
   });
 }
 
-function scheduleReconnect() {
-  if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
-    connectToParticle();
-  }, 5000);
-}
-
-async function connectToParticle() {
-  if (isConnecting) return;
-
-  if (!DEVICE_ID || DEVICE_ID.includes("PEGA_AQUI") || !ACCESS_TOKEN || ACCESS_TOKEN.includes("PEGA_AQUI")) {
-    setConnection("offline", "Faltan credenciales en app.js");
-    return;
-  }
-
-  if (!particle || typeof particle.getEventStream !== "function") {
-    setConnection("error", "No se pudo cargar particle-api-js");
-    return;
-  }
-
-  setConnection("offline", "Conectando a Particle Cloud…");
-  isConnecting = true;
-
-  try {
-    const stream = await particle.getEventStream({
-      deviceId: DEVICE_ID,
-      name: "calidad_aire",
-      auth: ACCESS_TOKEN
-    });
-    eventStream = stream;
-    isConnecting = false;
-
-    const handleDisconnect = (state, label) => {
-      if (eventStream !== stream) return;
-      eventStream = null;
-      setConnection(state, label);
-      scheduleReconnect();
-    };
-
-    setConnection("connected", "Esperando lectura del Photon…");
-
-    stream.on("event", event => {
-      if (eventStream !== stream) return;
-      try {
-        updateDashboard(parseEventData(event));
-      } catch (error) {
-        console.error("No se pudo procesar el evento calidad_aire:", error);
-        setConnection("error", "Error al leer el JSON");
-      }
-    });
-
-    stream.on("error", error => {
-      console.error("Error en el flujo de Particle Cloud:", error);
-      handleDisconnect("error", "Reconectando a Particle Cloud…");
-    });
-
-    stream.on("end", () => handleDisconnect("offline", "Flujo cerrado. Reconectando…"));
-    stream.on("close", () => handleDisconnect("offline", "Flujo cerrado. Reconectando…"));
-  } catch (error) {
-    console.error("No se pudo conectar a Particle Cloud:", error);
-    setConnection("error", "Sin conexión · reintentando…");
-    scheduleReconnect();
-  } finally {
-    isConnecting = false;
-  }
-}
-
-elements.form.addEventListener("submit", async event => {
-  event.preventDefault();
-  const threshold = Number(elements.threshold.value);
-
-  if (!Number.isInteger(threshold) || threshold < 400 || threshold > 10000) {
-    setNotice("error", "Ingresa un umbral entero entre 400 y 10 000 ppm.");
-    elements.threshold.focus();
-    return;
-  }
-
-  if (!DEVICE_ID || DEVICE_ID.includes("PEGA_AQUI") || !ACCESS_TOKEN || ACCESS_TOKEN.includes("PEGA_AQUI")) {
-    setNotice("error", "Completa DEVICE_ID y ACCESS_TOKEN en app.js antes de enviar el comando.");
-    return;
-  }
-
-  elements.button.disabled = true;
-  elements.button.querySelector("span").textContent = "Enviando comando…";
-  elements.notice.hidden = true;
-
-  try {
-    const response = await particle.callFunction({
-      deviceId: DEVICE_ID,
-      name: "setUmbral",
-      argument: String(threshold),
-      auth: ACCESS_TOKEN
-    });
-
-    if (response.return_value > 0) {
-      activeThreshold = threshold;
-      setNotice("success", `Umbral actualizado correctamente a ${threshold} ppm.`);
-    } else {
-      setNotice("error", `El dispositivo rechazó el umbral (código ${response.return_value}).`);
-    }
-  } catch (error) {
-    console.error("Falló la llamada a setUmbral:", error);
-    setNotice("error", "No fue posible actualizar el umbral. Verifica que la Photon esté en línea.");
-  } finally {
-    elements.button.disabled = false;
-    elements.button.querySelector("span").textContent = "Actualizar umbral";
-  }
-});
-
 elements.footerYear.textContent = new Date().getFullYear();
 initChart();
-connectToParticle();
+connectToReadings();
