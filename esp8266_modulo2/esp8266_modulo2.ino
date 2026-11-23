@@ -1,11 +1,12 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <SoftwareSerial.h>
 #include <DHT.h>
 
 const char* WIFI_SSID = "COM-818";
 const char* WIFI_PASSWORD = "";
-const char* SERVER_URL = "http://192.168.10.133:3000/api/readings";
+const char* SERVER_URL = "https://monitordeaire.site/api/readings";
 
 #define DHT_PIN D1
 #define DHT_TYPE DHT11
@@ -86,7 +87,8 @@ void postReadings() {
     t1, h1, mq6, t2, h2, mq2
   );
 
-  WiFiClient client;
+  BearSSL::WiFiClientSecure client;
+  client.setInsecure();
   HTTPClient http;
   if (!http.begin(client, SERVER_URL)) {
     Serial.println("No se pudo iniciar la conexion HTTP al servidor.");

@@ -1,0 +1,9 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/readings"
+  to = "/.netlify/functions/readings"
+  status = 200
+  force = true

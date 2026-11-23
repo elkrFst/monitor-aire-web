@@ -73,6 +73,34 @@ Los modulos DHT11 de tres pines suelen incluir la resistencia pull-up. Si tienes
 
 El servidor no tiene autenticacion y escucha en la red local: usa una red de confianza, no configures reenvio de puertos del router y no lo expongas a Internet.
 
+### Publicar en Netlify
+
+Para que `https://monitordeaire.site` muestre las lecturas reales, el proyecto necesita la funcion Netlify incluida en `netlify/functions/readings.mts` y el almacenamiento Netlify Blobs. Netlify no puede ejecutar `server.js` para el dominio publico.
+
+1. Instala las dependencias desde PowerShell:
+
+   ```powershell
+   npm install
+   npm install -g netlify-cli
+   ```
+
+2. Inicia sesion y despliega:
+
+   ```powershell
+   netlify login
+   netlify init
+   netlify deploy --prod
+   ```
+
+3. En Netlify, usa `netlify.toml` como configuracion del directorio de publicacion y funciones. Habilita la integracion de Netlify Blobs si tu plan te solicita aprobarla.
+4. Cambia en `esp8266_modulo2/esp8266_modulo2.ino` `SERVER_URL` por `https://monitordeaire.site/api/readings`. Para pruebas locales puedes volver temporalmente a `http://IP_DE_LA_COMPUTADORA:3000/api/readings`.
+5. El ESP8266 usa TLS en el firmware. Vuelve a cargarlo despues de cambiar la URL.
+6. Verifica la API publica en PowerShell:
+
+   ```powershell
+   Invoke-RestMethod https://monitordeaire.site/api/readings
+   ```
+
 ### 2. Cargar el programa del Photon
 
 Puedes usar el **[Particle Web IDE](https://build.particle.io/)** desde el navegador:
@@ -121,7 +149,6 @@ El panel presenta directamente el conteo del convertidor analogico-digital (ADC)
 - **El panel no abre:** confirma que `node server.js` sigue ejecutandose y que el puerto 3000 esta disponible.
 - **El ESP no se conecta:** revisa SSID, clave, cobertura y que la red permita comunicacion local entre dispositivos.
 - **El ESP no llega al servidor:** compara `SERVER_URL` con la IP actual impresa por Node.js; revisa Firewall en perfil privado.
-- **Temperatura/humedad aparece como `--`:** revisa DATA, VCC, GND, pull-up de 10 kΩ entre DATA y VCC y espera al siguiente ciclo de lectura. El firmware ESP8266 ahora ignora lecturas invalidas y muestra `Sin datos` cuando el DHT11 no responde.
-- **La pagina conserva valores despues de apagar el modulo:** el servidor limpia todas las lecturas despues de 15 segundos sin recibir un paquete HTTP. Si el navegador no recibe eventos de reconexion, recarga la pagina.
+- **Temperatura/humedad aparece como `--`:** revisa DATA, VCC, GND, pull-up del DHT11 y espera al siguiente ciclo de lectura.
 - **No llegan datos del Photon:** confirma GND comun, `TX` del Photon a `D5` del NodeMCU, 9600 baudios y que el Monitor serie no este conectado de forma que interfiera.
 - **El valor MQ se queda en 0 o cambia poco:** espera el calentamiento indicado por el fabricante y revisa alimentacion de 5 V, AO, divisor y GND. No ajustes el divisor suponiendo que el ADC aguanta mas voltaje.

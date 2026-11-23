@@ -125,26 +125,20 @@ function updateDashboard(payload) {
 }
 
 function connectToReadings() {
-  if (typeof EventSource === "undefined") {
-    setConnection("error", "Este navegador no admite eventos en tiempo real");
-    return;
+  async function pollReadings() {
+    try {
+      const response = await fetch("/api/readings", { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const payload = await response.json();
+      updateDashboard(payload);
+    } catch (error) {
+      console.error("No se pudo consultar las lecturas:", error);
+      setConnection("error", "Sin conexión con el servidor");
+    }
   }
 
-  eventStream = new EventSource("/api/events");
-  eventStream.onopen = () => {
-    if (!hasReceivedData) setConnection("connected", "Servidor local conectado");
-  };
-  eventStream.onmessage = event => {
-    try {
-      updateDashboard(JSON.parse(event.data));
-    } catch (error) {
-      console.error("No se pudo procesar la lectura recibida:", error);
-      setConnection("error", "Se recibieron datos no válidos");
-    }
-  };
-  eventStream.onerror = () => {
-    setConnection("offline", "Reconectando con el servidor local…");
-  };
+  pollReadings();
+  setInterval(pollReadings, 5000);
 }
 
 function initChart() {
