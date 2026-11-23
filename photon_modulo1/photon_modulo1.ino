@@ -3,10 +3,9 @@
 
 #define DHT_PIN D2
 #define DHT_TYPE DHT11
-#define MQ9_PIN A0
+#define MQ6_PIN A0
 
 const unsigned long READ_INTERVAL_MS = 3000;
-const int ADC_MAX_VALUE = 4095;
 
 DHT dht(DHT_PIN, DHT_TYPE);
 unsigned long lastRead = 0;
@@ -25,19 +24,18 @@ void loop() {
 
   const float humidity = dht.getHumidity();
   const float temperature = dht.getTempCelcius();
-  const int mq9Index = (analogRead(MQ9_PIN) * 100L) / ADC_MAX_VALUE;
+  const int mq6Raw = analogRead(MQ6_PIN);
 
   Serial1.print(isnan(temperature) ? -1 : temperature, 1);
   Serial1.print(',');
   Serial1.print(isnan(humidity) ? -1 : humidity, 1);
   Serial1.print(',');
-  Serial1.println(mq9Index);
+  Serial1.println(mq6Raw);
 
   Serial.print("Modulo 1 | temperatura: ");
   Serial.print(temperature);
   Serial.print(" C, humedad: ");
   Serial.print(humidity);
-  Serial.print(" %, MQ-9 relativo: ");
-  Serial.print(mq9Index);
-  Serial.println(" %");
+  Serial.print(" %, MQ-6 ADC: ");
+  Serial.println(mq6Raw);
 }

@@ -3,9 +3,9 @@
 #include <SoftwareSerial.h>
 #include <DHT.h>
 
-const char* WIFI_SSID = "ESCRIBE_EL_NOMBRE_DE_TU_WIFI";
-const char* WIFI_PASSWORD = "ESCRIBE_LA_CLAVE_DE_TU_WIFI";
-const char* SERVER_URL = "http://192.168.1.100:3000/api/readings";
+const char* WIFI_SSID = "COM-818";
+const char* WIFI_PASSWORD = "";
+const char* SERVER_URL = "http://192.168.10.133:3000/api/readings";
 
 #define DHT_PIN D1
 #define DHT_TYPE DHT11
@@ -15,16 +15,15 @@ const char* SERVER_URL = "http://192.168.1.100:3000/api/readings";
 
 const unsigned long READ_INTERVAL_MS = 3000;
 const unsigned long POST_INTERVAL_MS = 5000;
-const int ADC_MAX_VALUE = 1023;
 
 DHT dht(DHT_PIN, DHT_TYPE);
 SoftwareSerial photonSerial(PHOTON_RX_PIN, PHOTON_UNUSED_TX_PIN);
 float temperature1 = NAN;
 float humidity1 = NAN;
-float mq9Percent = NAN;
+float mq6Raw = NAN;
 float temperature2 = NAN;
 float humidity2 = NAN;
-float mq2Percent = NAN;
+float mq2Raw = NAN;
 unsigned long lastRead = 0;
 unsigned long lastPost = 0;
 
@@ -39,11 +38,11 @@ void readPhotonLine() {
       line[lineLength] = '\0';
       float newTemperature;
       float newHumidity;
-      float newMq9;
-      if (sscanf(line, "%f,%f,%f", &newTemperature, &newHumidity, &newMq9) == 3) {
+      int newMq6Raw;
+      if (sscanf(line, "%f,%f,%d", &newTemperature, &newHumidity, &newMq6Raw) == 3) {
         temperature1 = newTemperature >= 0 ? newTemperature : NAN;
         humidity1 = newHumidity >= 0 ? newHumidity : NAN;
-        mq9Percent = newMq9 >= 0 && newMq9 <= 100 ? newMq9 : NAN;
+        mq6Raw = newMq6Raw >= 0 && newMq6Raw <= 4095 ? newMq6Raw : NAN;
       } else {
         Serial.println("Se ignoro una linea invalida recibida de la Photon.");
       }
@@ -71,20 +70,20 @@ void postReadings() {
     return;
   }
 
-  char t1[16], h1[16], mq9[16], t2[16], h2[16], mq2[16], payload[192];
+  char t1[16], h1[16], mq6[16], t2[16], h2[16], mq2[16], payload[192];
   formatReading(temperature1, t1, sizeof(t1), 1);
   formatReading(humidity1, h1, sizeof(h1), 1);
-  formatReading(mq9Percent, mq9, sizeof(mq9), 0);
+  formatReading(mq6Raw, mq6, sizeof(mq6), 0);
   formatReading(temperature2, t2, sizeof(t2), 1);
   formatReading(humidity2, h2, sizeof(h2), 1);
-  formatReading(mq2Percent, mq2, sizeof(mq2), 0);
+  formatReading(mq2Raw, mq2, sizeof(mq2), 0);
 
   snprintf(
     payload,
     sizeof(payload),
-    "{\"temperature1\":%s,\"humidity1\":%s,\"mq9\":%s,"
+    "{\"temperature1\":%s,\"humidity1\":%s,\"mq6\":%s,"
     "\"temperature2\":%s,\"humidity2\":%s,\"mq2\":%s}",
-    t1, h1, mq9, t2, h2, mq2
+    t1, h1, mq6, t2, h2, mq2
   );
 
   WiFiClient client;
@@ -127,9 +126,14 @@ void loop() {
 
   if (now - lastRead >= READ_INTERVAL_MS) {
     lastRead = now;
-    temperature2 = dht.readTemperature();
-    humidity2 = dht.readHumidity();
-    mq2Percent = (analogRead(MQ2_PIN) * 100.0f) / ADC_MAX_VALUE;
+    float measuredTemperature = dht.readTemperature();
+    float measuredHumidity = dht.readHumidity();
+    temperature2 = isnan(measuredTemperature) ? NAN : measuredTemperature;
+    humidity2 = isnan(measuredHumidity) ? NAN : measuredHumidity;
+    mq2Raw = analogRead(MQ2_PIN);
+    if (isnan(measuredTemperature) || isnan(measuredHumidity)) {
+      Serial.println("DHT11 del modulo 2 no respondio. Revise DATA, GND y VCC.");
+    }
   }
 
   if (now - lastPost >= POST_INTERVAL_MS) {

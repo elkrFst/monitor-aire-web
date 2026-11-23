@@ -2,7 +2,7 @@
 
 ## Arquitectura
 
-- **Modulo 1:** Particle Photon 1 + DHT11 + MQ-9. La Photon manda sus tres lecturas por un cable serial al ESP8266.
+- **Modulo 1:** Particle Photon 1 + DHT11 + MQ-6. La Photon manda sus tres lecturas por un cable serial al ESP8266.
 - **Modulo 2:** NodeMCU ESP8266 + DHT11 + MQ-2. El ESP8266 combina sus lecturas con las que recibe de la Photon y las envia por Wi-Fi a la computadora.
 - **Pagina:** `server.js` sirve el panel en la computadora y recibe las lecturas en `http://IP_DE_LA_COMPUTADORA:3000/api/readings`. No usa Particle Cloud ni necesita un token en el navegador.
 
@@ -11,7 +11,7 @@ Esta guia supone que tu ESP8266 es una **placa de desarrollo NodeMCU (ESP-12E/ES
 ## Componentes y alimentacion
 
 - Particle Photon 1 y placa de desarrollo NodeMCU ESP8266.
-- Dos DHT11 y modulos MQ-2 y MQ-9 con salida analogica `AO`.
+- Dos DHT11 y modulos MQ-2 y MQ-6 con salida analogica `AO`.
 - Fuente regulada de **5 V** para los modulos MQ. Reserva al menos 500 mA para cada calefactor MQ; usa una fuente con capacidad suficiente para ambos si comparten fuente.
 - Cables y cuatro resistencias para los divisores de voltaje: dos de **10 kΩ** y dos de **20 kΩ**.
 - Cable USB para cada placa.
@@ -25,15 +25,15 @@ Los calefactores de los MQ consumen bastante mas que un pin de 3.3 V. No los ali
 | DHT11 del modulo 1 | VCC | `3V3` del Photon |
 | DHT11 del modulo 1 | DATA / OUT | `D2` del Photon |
 | DHT11 del modulo 1 | GND | `GND` del Photon |
-| MQ-9 | VCC | +5 V regulados |
-| MQ-9 | GND | GND comun |
-| MQ-9 | AO | Resistencia de 10 kΩ hacia `A0`; tambien al extremo superior del divisor de abajo |
-| Divisor del MQ-9 | Nodo entre resistencias | `A0` del Photon |
-| Divisor del MQ-9 | Resistencia de 20 kΩ | Entre `A0` y GND |
+| MQ-6 | VCC | +5 V regulados |
+| MQ-6 | GND | GND comun |
+| MQ-6 | AO | Resistencia de 10 kΩ hacia `A0`; tambien al extremo superior del divisor de abajo |
+| Divisor del MQ-6 | Nodo entre resistencias | `A0` del Photon |
+| Divisor del MQ-6 | Resistencia de 20 kΩ | Entre `A0` y GND |
 | Serial Photon → ESP8266 | `TX` del Photon | `D5` del NodeMCU (GPIO14, entrada serial del ESP) |
 | Referencia serial | `GND` del Photon | GND del NodeMCU |
 
-El divisor del MQ-9 queda asi: `MQ-9 AO → 10 kΩ → A0 del Photon → 20 kΩ → GND`. La conexion serial es **solo Photon TX a ESP D5**; no conectes `TX` del ESP al `RX` del Photon. El Photon transmite a 9600 baudios.
+El divisor del MQ-6 queda asi: `MQ-6 AO → 10 kΩ → A0 del Photon → 20 kΩ → GND`. La Photon envia a la pagina la lectura analogica sin convertir: un entero ADC entre **0 y 4095**. La conexion serial es **solo Photon TX a ESP D5**; no conectes `TX` del ESP al `RX` del Photon. El Photon transmite a 9600 baudios.
 
 ### Conexion del modulo 2 — NodeMCU ESP8266
 
@@ -50,7 +50,7 @@ El divisor del MQ-9 queda asi: `MQ-9 AO → 10 kΩ → A0 del Photon → 20 kΩ 
 | Serial desde Photon | `D5` del NodeMCU (GPIO14) | Recibe `TX` del Photon |
 | Serial sin usar | `D6` del NodeMCU | No conectar |
 
-El divisor del MQ-2 queda asi: `MQ-2 AO → 10 kΩ → A0 del NodeMCU → 20 kΩ → GND`. El NodeMCU envia los datos por Wi-Fi y no necesita cable USB de datos permanente despues de cargar su programa.
+El divisor del MQ-2 queda asi: `MQ-2 AO → 10 kΩ → A0 del NodeMCU → 20 kΩ → GND`. La pagina muestra la lectura analogica sin convertir: un entero ADC entre **0 y 1023**. El NodeMCU envia los datos por Wi-Fi y no necesita cable USB de datos permanente despues de cargar su programa.
 
 Los modulos DHT11 de tres pines suelen incluir la resistencia pull-up. Si tienes un DHT11 desnudo de cuatro pines, conecta una resistencia de **10 kΩ entre DATA y VCC**. Revisa las etiquetas de tu modulo antes de conectar; el orden fisico de los pines no es igual en todos.
 
@@ -75,13 +75,15 @@ El servidor no tiene autenticacion y escucha en la red local: usa una red de con
 
 ### 2. Cargar el programa del Photon
 
-1. Instala Visual Studio Code y la extension **Particle Workbench**. Configura tu cuenta Particle y selecciona el dispositivo/firmware **Photon**.
-2. Abre `photon_modulo1/photon_modulo1.ino` como proyecto de Particle Workbench.
-3. Instala la libreria Particle `Adafruit_DHT` con el comando de Workbench **Particle: Install Library** si aun no esta disponible.
-4. Conecta el Photon por USB, selecciona Photon como dispositivo y carga el programa con Workbench. El programa usa `D2` para el DHT11, `A0` para MQ-9 y `TX` para enviar la linea serial.
-5. Abre el monitor serial a 9600 baudios para comprobar las lecturas.
+Puedes usar el **[Particle Web IDE](https://build.particle.io/)** desde el navegador:
 
-Este firmware no requiere reclamar el Photon en Particle Cloud: solo usa la conexion serial hacia el ESP8266.
+1. Inicia sesion con tu cuenta Particle y crea o abre una app.
+2. Abre `photon_modulo1/photon_modulo1.ino` con un editor de texto y copia su contenido en el archivo principal de la app del Web IDE.
+3. En **Libraries**, agrega `Adafruit_DHT` a la app si aun no esta incluida.
+4. En la seleccion de dispositivo, elige tu **Photon 1**. Para flashear desde la web, debe estar reclamada en tu cuenta y conectada a Particle Cloud (en linea).
+5. Pulsa **Verify** para compilar y despues **Flash** para cargar el firmware al Photon por la nube. El programa usa `D2` para el DHT11, `A0` para MQ-6 y `TX` para enviar la linea serial.
+
+Si el Photon no aparece en linea o quieres cargarlo por USB, puedes usar **Particle Workbench** en Visual Studio Code: instala la extension, agrega `Adafruit_DHT`, conecta el Photon por USB y carga el firmware por USB/DFU. La conexion Particle Cloud solo es necesaria para el flasheo web; el funcionamiento del modulo despues usa la conexion serial al ESP8266. Abre un monitor serial a 9600 baudios para revisar las lecturas.
 
 ### 3. Cargar el programa del ESP8266
 
@@ -100,7 +102,7 @@ Guarda las credenciales Wi-Fi solo en tu copia local del firmware y no publiques
 
 ## Comprobacion
 
-Con el servidor ejecutandose, abre el panel y enciende ambos modulos. En unos segundos deben aparecer temperatura y humedad de cada DHT11, y una lectura relativa para cada MQ. Si el serial del ESP muestra `HTTP 200` pero el navegador no cambia, recarga `http://localhost:3000`.
+Con el servidor ejecutandose, abre el panel y enciende ambos modulos. En unos segundos deben aparecer temperatura y humedad de cada DHT11, y el valor ADC crudo de cada MQ. El MQ-6 usa la escala 0–4095 de la Photon; el MQ-2 usa la escala 0–1023 del NodeMCU. Si el serial del ESP muestra `HTTP 200` pero el navegador no cambia, recarga `http://localhost:3000`.
 
 Tambien puedes comprobar el servidor en PowerShell:
 
@@ -108,17 +110,18 @@ Tambien puedes comprobar el servidor en PowerShell:
 Invoke-RestMethod http://localhost:3000/api/readings
 ```
 
-La respuesta contiene `temperature1`, `humidity1`, `mq9`, `temperature2`, `humidity2`, `mq2` y `updatedAt`.
+La respuesta contiene `temperature1`, `humidity1`, `mq6` (ADC crudo 0–4095), `temperature2`, `humidity2`, `mq2` (ADC crudo 0–1023) y `updatedAt`.
 
-## Que significan los valores MQ
+## Lecturas MQ
 
-MQ-2 y MQ-9 son sensores resistivos que necesitan calentamiento, calibracion y condiciones de prueba definidas. El panel convierte el ADC de cada placa a una escala electronica **relativa de 0 a 100%**; no calcula ppm, no identifica de forma fiable un gas especifico y no indica por si solo que el aire sea seguro o peligroso. Para lecturas cuantitativas sigue la hoja de datos, el circuito de calefaccion/calibracion recomendado y patrones de gas certificados. No uses este montaje como alarma de CO ni como sustituto de un detector certificado.
+El panel presenta directamente el conteo del convertidor analogico-digital (ADC) de cada placa; no lo transforma a porcentaje ni a ppm. Los MQ-2 y MQ-6 requieren calentamiento y calibracion para mediciones de concentracion. No uses este montaje como alarma de gas ni como sustituto de un detector certificado.
 
 ## Solucion de problemas
 
 - **El panel no abre:** confirma que `node server.js` sigue ejecutandose y que el puerto 3000 esta disponible.
 - **El ESP no se conecta:** revisa SSID, clave, cobertura y que la red permita comunicacion local entre dispositivos.
 - **El ESP no llega al servidor:** compara `SERVER_URL` con la IP actual impresa por Node.js; revisa Firewall en perfil privado.
-- **Temperatura/humedad aparece como `--`:** revisa DATA, VCC, GND, pull-up del DHT11 y espera al siguiente ciclo de lectura.
+- **Temperatura/humedad aparece como `--`:** revisa DATA, VCC, GND, pull-up de 10 kΩ entre DATA y VCC y espera al siguiente ciclo de lectura. El firmware ESP8266 ahora ignora lecturas invalidas y muestra `Sin datos` cuando el DHT11 no responde.
+- **La pagina conserva valores despues de apagar el modulo:** el servidor limpia todas las lecturas despues de 15 segundos sin recibir un paquete HTTP. Si el navegador no recibe eventos de reconexion, recarga la pagina.
 - **No llegan datos del Photon:** confirma GND comun, `TX` del Photon a `D5` del NodeMCU, 9600 baudios y que el Monitor serie no este conectado de forma que interfiera.
 - **El valor MQ se queda en 0 o cambia poco:** espera el calentamiento indicado por el fabricante y revisa alimentacion de 5 V, AO, divisor y GND. No ajustes el divisor suponiendo que el ADC aguanta mas voltaje.

@@ -1,11 +1,11 @@
 const HISTORY_LIMIT = 24;
 const metricDefinitions = {
-  temperature1: { digits: 1, unit: "°C", chart: 0 },
-  humidity1: { digits: 0, unit: "%", chart: 1 },
-  mq9: { digits: 0, unit: "%", chart: 2 },
-  temperature2: { digits: 1, unit: "°C", chart: 3 },
-  humidity2: { digits: 0, unit: "%", chart: 4 },
-  mq2: { digits: 0, unit: "%", chart: 5 }
+  temperature1: { digits: 1 },
+  humidity1: { digits: 0 },
+  mq6: { digits: 0 },
+  temperature2: { digits: 1 },
+  humidity2: { digits: 0 },
+  mq2: { digits: 0 }
 };
 const history = { labels: [], values: Object.fromEntries(
   Object.keys(metricDefinitions).map(metric => [metric, []])
@@ -17,7 +17,10 @@ const elements = {
   connection: document.getElementById("connection-status"),
   connectionLabel: document.getElementById("connection-label"),
   updated: document.getElementById("last-updated"),
-  footerYear: document.getElementById("footer-year")
+  footerYear: document.getElementById("footer-year"),
+  themeToggle: document.getElementById("theme-toggle"),
+  themeLabel: document.getElementById("theme-label"),
+  themeColor: document.querySelector('meta[name="theme-color"]')
 };
 let historyChart;
 let eventStream;
@@ -34,10 +37,18 @@ function asFiniteNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function metricStatus(metric, value) {
+function metricStatus(value) {
   if (value === null) return { state: "unknown", label: "Sin datos" };
-  if (metric.startsWith("mq")) return { state: "unknown", label: "Escala relativa" };
-  return { state: "good", label: "Lectura recibida" };
+  return { state: "connected", label: "Lectura recibida" };
+}
+
+function markReadingsStale() {
+  for (const metric of Object.keys(metricDefinitions)) {
+    latestValues[metric] = null;
+    setMetric(metric, null);
+  }
+  setConnection("offline", "Sin lecturas · módulo desconectado");
+  elements.updated.textContent = "--:--:--";
 }
 
 function setMetric(metric, value) {
@@ -46,12 +57,13 @@ function setMetric(metric, value) {
   const output = document.getElementById(`${metric}-value`);
   const stateOutput = document.getElementById(`${metric}-state`);
   output.textContent = value === null ? "--" : value.toFixed(definition.digits);
-  const status = metricStatus(metric, value);
+  const status = metricStatus(value);
   stateOutput.textContent = status.label;
   card.dataset.state = status.state;
 }
 
 function addToHistory(values) {
+  if (Object.values(values).every(value => value === null)) return;
   history.labels.push(new Date().toLocaleTimeString("es", {
     hour: "2-digit",
     minute: "2-digit",
@@ -68,11 +80,8 @@ function addToHistory(values) {
   }
   if (!historyChart) return;
   historyChart.data.labels = [...history.labels];
-  historyChart.data.datasets.forEach((dataset, index) => {
-    const metric = Object.keys(metricDefinitions).find(
-      key => metricDefinitions[key].chart === index
-    );
-    dataset.data = [...history.values[metric]];
+  historyChart.data.datasets.forEach(dataset => {
+    dataset.data = [...history.values[dataset.metric]];
   });
   historyChart.update("none");
 }
@@ -80,6 +89,11 @@ function addToHistory(values) {
 function updateDashboard(payload) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     setConnection("error", "Se recibieron datos no válidos");
+    return;
+  }
+
+  if (payload.stale === true) {
+    markReadingsStale();
     return;
   }
 
@@ -128,12 +142,10 @@ function initChart() {
     return;
   }
   const datasets = [
-    { label: "Temperatura M1 (°C)", metric: "temperature1", color: "#f1b85b", axis: "y" },
-    { label: "Humedad M1 (%)", metric: "humidity1", color: "#54c9e8", axis: "y" },
-    { label: "MQ-9 relativo (%)", metric: "mq9", color: "#58dfb0", axis: "y1" },
-    { label: "Temperatura M2 (°C)", metric: "temperature2", color: "#ff8c69", axis: "y" },
-    { label: "Humedad M2 (%)", metric: "humidity2", color: "#a99bff", axis: "y" },
-    { label: "MQ-2 relativo (%)", metric: "mq2", color: "#f47fa5", axis: "y1" }
+    { label: "Temperatura · Photon 1 (°C)", metric: "temperature1", color: "--orange", axis: "y", dash: [] },
+    { label: "Temperatura · ESP8266 (°C)", metric: "temperature2", color: "--cyan", axis: "y", dash: [] },
+    { label: "Humedad · Photon 1 (%)", metric: "humidity1", color: "--orange", axis: "y1", dash: [5, 4] },
+    { label: "Humedad · ESP8266 (%)", metric: "humidity2", color: "--cyan", axis: "y1", dash: [5, 4] }
   ];
   historyChart = new Chart(document.getElementById("history-chart").getContext("2d"), {
     type: "line",
@@ -141,14 +153,16 @@ function initChart() {
       labels: history.labels,
       datasets: datasets.map(dataset => ({
         label: dataset.label,
+        metric: dataset.metric,
         data: history.values[dataset.metric],
-        borderColor: dataset.color,
-        backgroundColor: `${dataset.color}18`,
+        borderColor: getThemeColor(dataset.color),
+        backgroundColor: getThemeColor(dataset.color),
         yAxisID: dataset.axis,
+        borderDash: dataset.dash,
         tension: 0.35,
-        borderWidth: 2,
-        pointRadius: 2,
-        pointHoverRadius: 4,
+        borderWidth: 1.8,
+        pointRadius: 1,
+        pointHoverRadius: 3,
         spanGaps: true
       }))
     },
@@ -159,25 +173,25 @@ function initChart() {
       plugins: {
         legend: { display: false },
         tooltip: {
-          backgroundColor: "#18232e",
-          borderColor: "rgba(165,190,208,.16)",
+          backgroundColor: getThemeColor("--surface"),
+          borderColor: getThemeColor("--line"),
           borderWidth: 1,
-          titleColor: "#dce7eb",
-          bodyColor: "#9cacb5",
+          titleColor: getThemeColor("--text"),
+          bodyColor: getThemeColor("--muted"),
           padding: 10
         }
       },
       scales: {
         x: {
           grid: { display: false },
-          border: { display: false },
-          ticks: { color: "#667580", maxTicksLimit: 6, font: { family: "DM Sans", size: 9 } }
+          border: { color: getThemeColor("--line") },
+          ticks: { color: getThemeColor("--chart-tick"), maxTicksLimit: 6, font: { family: "DM Sans", size: 9 } }
         },
         y: {
           position: "left",
-          grid: { color: "rgba(165,190,208,.07)" },
+          grid: { color: getThemeColor("--grid") },
           border: { display: false },
-          ticks: { color: "#667580", maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
+          ticks: { color: getThemeColor("--chart-tick"), maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
         },
         y1: {
           position: "right",
@@ -185,13 +199,55 @@ function initChart() {
           max: 100,
           grid: { drawOnChartArea: false },
           border: { display: false },
-          ticks: { color: "#667580", maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
+          ticks: { color: getThemeColor("--chart-tick"), maxTicksLimit: 4, font: { family: "DM Sans", size: 9 } }
         }
       }
     }
   });
 }
 
+function getThemeColor(token) {
+  return getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+}
+
+function applyTheme(theme) {
+  const isLight = theme === "light";
+  document.documentElement.dataset.theme = theme;
+  elements.themeLabel.textContent = isLight ? "Modo oscuro" : "Modo claro";
+  elements.themeToggle.setAttribute("aria-label", `Cambiar a ${isLight ? "modo oscuro" : "modo claro"}`);
+  elements.themeToggle.title = `Cambiar a ${isLight ? "modo oscuro" : "modo claro"}`;
+  elements.themeColor.content = isLight ? "#f4f6f3" : "#101619";
+
+  try {
+    localStorage.setItem("aire-theme", theme);
+  } catch (error) {
+    console.warn("No se pudo guardar la preferencia de tema.");
+  }
+
+  if (!historyChart) return;
+  historyChart.data.datasets.forEach(dataset => {
+    const colorToken = dataset.metric.endsWith("1") ? "--orange" : "--cyan";
+    dataset.borderColor = getThemeColor(colorToken);
+    dataset.backgroundColor = getThemeColor(colorToken);
+  });
+  historyChart.options.plugins.tooltip.backgroundColor = getThemeColor("--surface");
+  historyChart.options.plugins.tooltip.borderColor = getThemeColor("--line");
+  historyChart.options.plugins.tooltip.titleColor = getThemeColor("--text");
+  historyChart.options.plugins.tooltip.bodyColor = getThemeColor("--muted");
+  historyChart.options.scales.x.border.color = getThemeColor("--line");
+  historyChart.options.scales.x.ticks.color = getThemeColor("--chart-tick");
+  historyChart.options.scales.y.grid.color = getThemeColor("--grid");
+  historyChart.options.scales.y.ticks.color = getThemeColor("--chart-tick");
+  historyChart.options.scales.y1.ticks.color = getThemeColor("--chart-tick");
+  historyChart.update();
+}
+
+elements.themeToggle.addEventListener("click", () => {
+  const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(nextTheme);
+});
+
 elements.footerYear.textContent = new Date().getFullYear();
 initChart();
+applyTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
 connectToReadings();

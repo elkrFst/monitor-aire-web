@@ -14,14 +14,31 @@ const webFiles = {
 const readingKeys = [
   "temperature1",
   "humidity1",
-  "mq9",
+  "mq6",
   "temperature2",
   "humidity2",
   "mq2"
 ];
 let readings = Object.fromEntries(readingKeys.map(key => [key, null]));
 let updatedAt = null;
+let lastReceivedAt = null;
+const READING_TIMEOUT_MS = 15000;
+const STALE_CHECK_INTERVAL_MS = 5000;
 const clients = new Set();
+
+function clearExpiredReadings() {
+  if (!lastReceivedAt) return false;
+  if (Date.now() - lastReceivedAt <= READING_TIMEOUT_MS) return false;
+  readings = Object.fromEntries(readingKeys.map(key => [key, null]));
+  updatedAt = new Date().toISOString();
+  lastReceivedAt = null;
+  return true;
+}
+
+function isReadingsStale() {
+  if (!lastReceivedAt) return updatedAt !== null;
+  return false;
+}
 
 function sendJson(response, statusCode, body) {
   response.writeHead(statusCode, {
@@ -67,8 +84,18 @@ function validateReadings(value) {
     }
     if (reading === null) continue;
 
-    const maximum = key.startsWith("temperature") ? 80 : 100;
+    if ((key === "mq6" || key === "mq2") && !Number.isInteger(reading)) {
+      return `La lectura ${key} debe ser un entero ADC.`;
+    }
+
     const minimum = key.startsWith("temperature") ? -20 : 0;
+    const maximum = key.startsWith("temperature")
+      ? 80
+      : key.startsWith("humidity")
+        ? 100
+        : key === "mq6"
+          ? 4095
+          : 1023;
     if (reading < minimum || reading > maximum) {
       return `La lectura ${key} esta fuera del rango permitido (${minimum} a ${maximum}).`;
     }
@@ -77,7 +104,7 @@ function validateReadings(value) {
 }
 
 function broadcastReadings() {
-  const message = `data: ${JSON.stringify({ ...readings, updatedAt })}\n\n`;
+  const message = `data: ${JSON.stringify({ ...readings, updatedAt, stale: isReadingsStale() })}\n\n`;
   for (const client of clients) client.write(message);
 }
 
@@ -101,6 +128,7 @@ async function handleReadings(request, response) {
 
   readings = Object.fromEntries(readingKeys.map(key => [key, payload[key]]));
   updatedAt = new Date().toISOString();
+  lastReceivedAt = Date.now();
   broadcastReadings();
   sendJson(response, 200, { ok: true, updatedAt });
 }
@@ -112,7 +140,8 @@ function handleEvents(request, response) {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no"
   });
-  response.write(`data: ${JSON.stringify({ ...readings, updatedAt })}\n\n`);
+  clearExpiredReadings();
+  response.write(`data: ${JSON.stringify({ ...readings, updatedAt, stale: isReadingsStale() })}\n\n`);
   clients.add(response);
   request.on("close", () => clients.delete(response));
 }
@@ -121,7 +150,8 @@ const server = http.createServer((request, response) => {
   const requestUrl = new URL(request.url, "http://localhost");
 
   if (request.method === "GET" && requestUrl.pathname === "/api/readings") {
-    sendJson(response, 200, { ...readings, updatedAt });
+    clearExpiredReadings();
+    sendJson(response, 200, { ...readings, updatedAt, stale: isReadingsStale() });
     return;
   }
   if (request.method === "GET" && requestUrl.pathname === "/api/events") {
@@ -174,3 +204,7 @@ server.listen(PORT, "0.0.0.0", () => {
   }
   console.log("Mantén este proceso activo para recibir lecturas de los módulos.");
 });
+
+setInterval(() => {
+  if (clearExpiredReadings()) broadcastReadings();
+}, STALE_CHECK_INTERVAL_MS);
