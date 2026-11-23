@@ -75,7 +75,7 @@ El servidor no tiene autenticacion y escucha en la red local: usa una red de con
 
 ### Publicar en Netlify
 
-Para que `https://monitordeaire.site` muestre las lecturas reales, el proyecto necesita la funcion Netlify incluida en `netlify/functions/readings.mts` y el almacenamiento Netlify Blobs. Netlify no puede ejecutar `server.js` para el dominio publico.
+Para que `https://monitordeaire.site` muestre las lecturas reales, el proyecto usa una funcion Netlify en `netlify/functions/readings.js` y Netlify Blobs como almacenamiento compartido. Netlify no puede ejecutar `server.js` para el dominio publico.
 
 1. Instala las dependencias desde PowerShell:
 
@@ -92,14 +92,17 @@ Para que `https://monitordeaire.site` muestre las lecturas reales, el proyecto n
    netlify deploy --prod
    ```
 
-3. En Netlify, usa `netlify.toml` como configuracion del directorio de publicacion y funciones. Habilita la integracion de Netlify Blobs si tu plan te solicita aprobarla.
-4. Cambia en `esp8266_modulo2/esp8266_modulo2.ino` `SERVER_URL` por `https://monitordeaire.site/api/readings`. Para pruebas locales puedes volver temporalmente a `http://IP_DE_LA_COMPUTADORA:3000/api/readings`.
-5. El ESP8266 usa TLS en el firmware. Vuelve a cargarlo despues de cambiar la URL.
-6. Verifica la API publica en PowerShell:
+3. En Netlify, abre **Project configuration → Environment variables** y agrega `NETLIFY_BLOBS_TOKEN`. El valor debe ser un **Personal access token** de Netlify. Se crea desde la configuracion de usuario, en **Applications → Personal access tokens**. Guárdalo como variable secreta solo en Netlify; no lo pegues en el firmware, no lo envies por chat y no lo subas al repositorio. El ID del sitio ya esta configurado en la funcion.
+4. Guarda la variable y dispara un nuevo deploy de produccion para que la funcion reciba la configuracion.
+5. Cambia en `esp8266_modulo2/esp8266_modulo2.ino` `SERVER_URL` por `https://monitordeaire.site/api/readings`. Para pruebas locales puedes volver temporalmente a `http://IP_DE_LA_COMPUTADORA:3000/api/readings`.
+6. El ESP8266 usa TLS en el firmware. Vuelve a cargarlo despues de cambiar la URL.
+7. Verifica la API publica en PowerShell:
 
    ```powershell
    Invoke-RestMethod https://monitordeaire.site/api/readings
    ```
+
+El endpoint respondera con error `503` hasta que exista `NETLIFY_BLOBS_TOKEN` en las variables de entorno de produccion.
 
 ### 2. Cargar el programa del Photon
 

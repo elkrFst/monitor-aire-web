@@ -4,8 +4,8 @@
 #include <SoftwareSerial.h>
 #include <DHT.h>
 
-const char* WIFI_SSID = "COM-818";
-const char* WIFI_PASSWORD = "";
+const char* WIFI_SSID = "Practicas";
+const char* WIFI_PASSWORD = "ucolfie26";
 const char* SERVER_URL = "https://monitordeaire.site/api/readings";
 
 #define DHT_PIN D1
