@@ -47,6 +47,17 @@ function markReadingsStale() {
     latestValues[metric] = null;
     setMetric(metric, null);
   }
+  history.labels = [];
+  for (const metric of Object.keys(metricDefinitions)) {
+    history.values[metric] = [];
+  }
+  if (historyChart) {
+    historyChart.data.labels = [];
+    historyChart.data.datasets.forEach(dataset => {
+      dataset.data = [];
+    });
+    historyChart.update("none");
+  }
   setConnection("offline", "Sin lecturas · módulo desconectado");
   elements.updated.textContent = "--:--:--";
 }
