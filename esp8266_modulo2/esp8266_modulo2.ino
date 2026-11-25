@@ -4,8 +4,12 @@
 #include <SoftwareSerial.h>
 #include <DHT.h>
 
-const char* WIFI_SSID = "Practicas";
-const char* WIFI_PASSWORD = "ucolfie26";
+//const char* WIFI_SSID = "Practicas";
+//const char* WIFI_PASSWORD = "ucolfie26";
+//const char* SERVER_URL = "https://monitordeaire.site/api/readings";
+
+const char* WIFI_SSID = "iPhone kris";
+const char* WIFI_PASSWORD = "hola123456";
 const char* SERVER_URL = "https://monitordeaire.site/api/readings";
 
 #define DHT_PIN D1
@@ -57,12 +61,15 @@ void readPhotonLine() {
   }
 }
 
-void formatReading(float value, char* output, size_t outputSize, int decimals) {
-  if (!isfinite(value)) {
-    snprintf(output, outputSize, "null");
-    return;
-  }
-  snprintf(output, outputSize, decimals == 0 ? "%.0f" : "%.1f", value);
+void appendFloatField(char* buffer, size_t bufferSize, bool& hasField, const char* key, float value, int decimals) {
+  if (!isfinite(value)) return;
+  char numBuf[16];
+  snprintf(numBuf, sizeof(numBuf), decimals == 0 ? "%.0f" : "%.1f", value);
+
+  char entry[48];
+  snprintf(entry, sizeof(entry), "%s\"%s\":%s", hasField ? "," : "", key, numBuf);
+  strncat(buffer, entry, bufferSize - strlen(buffer) - 1);
+  hasField = true;
 }
 
 void postReadings() {
@@ -71,21 +78,25 @@ void postReadings() {
     return;
   }
 
-  char t1[16], h1[16], mq6[16], t2[16], h2[16], mq2[16], payload[192];
-  formatReading(temperature1, t1, sizeof(t1), 1);
-  formatReading(humidity1, h1, sizeof(h1), 1);
-  formatReading(mq6Raw, mq6, sizeof(mq6), 0);
-  formatReading(temperature2, t2, sizeof(t2), 1);
-  formatReading(humidity2, h2, sizeof(h2), 1);
-  formatReading(mq2Raw, mq2, sizeof(mq2), 0);
+  char payload[224] = "{";
+  bool hasField = false;
 
-  snprintf(
-    payload,
-    sizeof(payload),
-    "{\"temperature1\":%s,\"humidity1\":%s,\"mq6\":%s,"
-    "\"temperature2\":%s,\"humidity2\":%s,\"mq2\":%s}",
-    t1, h1, mq6, t2, h2, mq2
-  );
+  // Solo agrega campos del Photon si llegaron datos validos por serial
+  appendFloatField(payload, sizeof(payload), hasField, "temperature1", temperature1, 1);
+  appendFloatField(payload, sizeof(payload), hasField, "humidity1", humidity1, 1);
+  appendFloatField(payload, sizeof(payload), hasField, "mq6", mq6Raw, 0);
+
+  // Campos del Modulo 2 (ESP8266)
+  appendFloatField(payload, sizeof(payload), hasField, "temperature2", temperature2, 1);
+  appendFloatField(payload, sizeof(payload), hasField, "humidity2", humidity2, 1);
+  appendFloatField(payload, sizeof(payload), hasField, "mq2", mq2Raw, 0);
+
+  strncat(payload, "}", sizeof(payload) - strlen(payload) - 1);
+
+  if (!hasField) {
+    Serial.println("No hay lecturas validas para enviar; se omitio el POST.");
+    return;
+  }
 
   BearSSL::WiFiClientSecure client;
   client.setInsecure();
@@ -97,7 +108,7 @@ void postReadings() {
   http.addHeader("Content-Type", "application/json");
   const int statusCode = http.POST(payload);
   if (statusCode > 0) {
-    Serial.printf("Lecturas enviadas. HTTP %d\n", statusCode);
+    Serial.printf("Lecturas enviadas (%s). HTTP %d\n", payload, statusCode);
   } else {
     Serial.printf("Error al enviar lecturas: %s\n", http.errorToString(statusCode).c_str());
   }
