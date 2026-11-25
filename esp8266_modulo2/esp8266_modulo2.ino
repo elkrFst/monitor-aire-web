@@ -1,7 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiClientSecure.h>
-#include <SoftwareSerial.h>
 #include <DHT.h>
 
 //const char* WIFI_SSID = "Practicas";
@@ -15,51 +14,16 @@ const char* SERVER_URL = "https://monitordeaire.site/api/readings";
 #define DHT_PIN D1
 #define DHT_TYPE DHT11
 #define MQ2_PIN A0
-#define PHOTON_RX_PIN D5
-#define PHOTON_UNUSED_TX_PIN D6
 
 const unsigned long READ_INTERVAL_MS = 3000;
 const unsigned long POST_INTERVAL_MS = 5000;
 
 DHT dht(DHT_PIN, DHT_TYPE);
-SoftwareSerial photonSerial(PHOTON_RX_PIN, PHOTON_UNUSED_TX_PIN);
-float temperature1 = NAN;
-float humidity1 = NAN;
-float mq6Raw = NAN;
 float temperature2 = NAN;
 float humidity2 = NAN;
 float mq2Raw = NAN;
 unsigned long lastRead = 0;
 unsigned long lastPost = 0;
-
-void readPhotonLine() {
-  static char line[64];
-  static size_t lineLength = 0;
-
-  while (photonSerial.available()) {
-    const char character = static_cast<char>(photonSerial.read());
-    if (character == '\r') continue;
-    if (character == '\n') {
-      line[lineLength] = '\0';
-      float newTemperature;
-      float newHumidity;
-      int newMq6Raw;
-      if (sscanf(line, "%f,%f,%d", &newTemperature, &newHumidity, &newMq6Raw) == 3) {
-        temperature1 = newTemperature >= 0 ? newTemperature : NAN;
-        humidity1 = newHumidity >= 0 ? newHumidity : NAN;
-        mq6Raw = newMq6Raw >= 0 && newMq6Raw <= 4095 ? newMq6Raw : NAN;
-      } else {
-        Serial.println("Se ignoro una linea invalida recibida de la Photon.");
-      }
-      lineLength = 0;
-    } else if (lineLength < sizeof(line) - 1) {
-      line[lineLength++] = character;
-    } else {
-      lineLength = 0;
-      Serial.println("Se descarto una linea larga recibida de la Photon.");
-    }
-  }
-}
 
 void appendFloatField(char* buffer, size_t bufferSize, bool& hasField, const char* key, float value, int decimals) {
   char numBuf[16];
@@ -81,25 +45,13 @@ void postReadings() {
     return;
   }
 
-  char payload[224] = "{";
-  bool hasField = false;
-
-  // Solo agrega campos del Photon si llegaron datos validos por serial
-  appendFloatField(payload, sizeof(payload), hasField, "temperature1", temperature1, 1);
-  appendFloatField(payload, sizeof(payload), hasField, "humidity1", humidity1, 1);
-  appendFloatField(payload, sizeof(payload), hasField, "mq6", mq6Raw, 0);
-
-  // Campos del Modulo 2 (ESP8266)
+  char payload[128] = "{\"source\":\"esp8266\"";
+  bool hasField = true;
   appendFloatField(payload, sizeof(payload), hasField, "temperature2", temperature2, 1);
   appendFloatField(payload, sizeof(payload), hasField, "humidity2", humidity2, 1);
   appendFloatField(payload, sizeof(payload), hasField, "mq2", mq2Raw, 0);
 
   strncat(payload, "}", sizeof(payload) - strlen(payload) - 1);
-
-  if (!hasField) {
-    Serial.println("No hay lecturas validas para enviar; se omitio el POST.");
-    return;
-  }
 
   BearSSL::WiFiClientSecure client;
   client.setInsecure();
@@ -123,7 +75,6 @@ void postReadings() {
 
 void setup() {
   Serial.begin(115200);
-  photonSerial.begin(9600);
   dht.begin();
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
@@ -140,7 +91,6 @@ void setup() {
 }
 
 void loop() {
-  readPhotonLine();
   const unsigned long now = millis();
 
   if (now - lastRead >= READ_INTERVAL_MS) {

@@ -118,7 +118,15 @@ function updateDashboard(payload) {
     addToHistory(latestValues);
     elements.updated.textContent = new Date(payload.updatedAt).toLocaleTimeString("es", { hour12: false });
     hasReceivedData = true;
-    setConnection("connected", "Datos recibidos de los módulos");
+    const activeModules = payload.modules
+      ? Object.entries(payload.modules)
+        .filter(([, status]) => status && status.stale === false)
+        .map(([module]) => module === "photon" ? "Photon" : "ESP8266")
+      : [];
+    const label = activeModules.length
+      ? `Datos recibidos · ${activeModules.join(" y ")}`
+      : "Datos recibidos de los módulos";
+    setConnection("connected", label);
   } else {
     setConnection("connected", "Servidor local · esperando sensores");
   }

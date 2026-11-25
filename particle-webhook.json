@@ -1,0 +1,11 @@
+{
+  "name": "photon-readings-to-netlify",
+  "event": "photon-readings",
+  "url": "https://monitordeaire.site/api/readings",
+  "requestType": "POST",
+  "noDefaults": true,
+  "headers": {
+    "Content-Type": "application/json"
+  },
+  "body": "{\"event\":\"{{{PARTICLE_EVENT_NAME}}}\",\"data\":{{{PARTICLE_EVENT_VALUE}}}}"
+}
