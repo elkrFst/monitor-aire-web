@@ -62,9 +62,12 @@ void readPhotonLine() {
 }
 
 void appendFloatField(char* buffer, size_t bufferSize, bool& hasField, const char* key, float value, int decimals) {
-  if (!isfinite(value)) return;
   char numBuf[16];
-  snprintf(numBuf, sizeof(numBuf), decimals == 0 ? "%.0f" : "%.1f", value);
+  if (isfinite(value)) {
+    snprintf(numBuf, sizeof(numBuf), decimals == 0 ? "%.0f" : "%.1f", value);
+  } else {
+    snprintf(numBuf, sizeof(numBuf), "null");
+  }
 
   char entry[48];
   snprintf(entry, sizeof(entry), "%s\"%s\":%s", hasField ? "," : "", key, numBuf);
@@ -109,6 +112,9 @@ void postReadings() {
   const int statusCode = http.POST(payload);
   if (statusCode > 0) {
     Serial.printf("Lecturas enviadas (%s). HTTP %d\n", payload, statusCode);
+    if (statusCode >= 400) {
+      Serial.println(http.getString());
+    }
   } else {
     Serial.printf("Error al enviar lecturas: %s\n", http.errorToString(statusCode).c_str());
   }

@@ -150,8 +150,9 @@ El panel presenta directamente el conteo del convertidor analogico-digital (ADC)
 ## Solucion de problemas
 
 - **El panel no abre:** confirma que `node server.js` sigue ejecutandose y que el puerto 3000 esta disponible.
-- **El ESP no se conecta:** revisa SSID, clave, cobertura y que la red permita comunicacion local entre dispositivos.
+- **El ESP no se conecta:** revisa que `WIFI_SSID` y `WIFI_PASSWORD` en el firmware correspondan a la red actual (el ESP no cambia de red automáticamente), cobertura y que la red permita comunicacion entre dispositivos. Si el Monitor serie se queda en `Conectando a Wi-Fi`, todavía no está conectado.
 - **El ESP no llega al servidor:** compara `SERVER_URL` con la IP actual impresa por Node.js; revisa Firewall en perfil privado.
+- **El panel público sigue sin datos:** abre `https://monitordeaire.site/api/readings`. Si la respuesta incluye `"stale":true`, no han llegado lecturas válidas recientemente; el `404` de `/favicon.ico` no es la causa. Revisa el Monitor serie del ESP: `HTTP 200` confirma que el servidor aceptó el envío; los errores HTTP muestran también el detalle de la respuesta. En el firmware actual, los sensores sin lectura válida se envían como `null` para que no invaliden el resto del paquete.
 - **Temperatura/humedad aparece como `--`:** revisa DATA, VCC, GND, pull-up del DHT11 y espera al siguiente ciclo de lectura.
 - **No llegan datos del Photon:** confirma GND comun, `TX` del Photon a `D5` del NodeMCU, 9600 baudios y que el Monitor serie no este conectado de forma que interfiera.
 - **El valor MQ se queda en 0 o cambia poco:** espera el calentamiento indicado por el fabricante y revisa alimentacion de 5 V, AO, divisor y GND. No ajustes el divisor suponiendo que el ADC aguanta mas voltaje.
